@@ -40,11 +40,12 @@ extern "C" {
 		int 	baudrate;		
 		int 	read_minsize;
 		int 	ctrl_flow;
-		UART_DataType	*path;
+		UART_DataType	path[512];
 		int  	fd ;
 		pack_t			pack_status;
 		pthread_mutex_t 	mutex_cks;
-		pthread_t 			pthread_read_id;
+		pthread_t 			pthread_read_fd;
+		pthread_t 			pthread_send_fd;
 	}uart_t;
 
 	/**

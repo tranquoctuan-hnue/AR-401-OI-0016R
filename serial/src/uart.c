@@ -10,11 +10,13 @@
 #include <sys/select.h>
 // #include <asm-generic/termbits.h>
 
+uart_t uart;
+
 int UART_BaudtoSpeed(int baundrate);
 UART_ResType UART_Config(int uart_fd, int speed, int flow);
 UART_ResType UART_SetReadmin(int uart_fd, int min_size);
 
-void *pthread_readUART_init(void *argc);
+void *pthread_read(void *argc);
 void *pthread_readUART_deinit(uart_t *uart);
 
 int UART_BaudtoSpeed(int baudrate)
@@ -59,15 +61,14 @@ int UART_BaudtoSpeed(int baudrate)
 
 
 // Hàm thiết lập UART
-unsigned char UART_Init(uart_t *uart)
+unsigned char UART_Init(char *path, int baudrate)
 {
     unsigned char status;
-    int fd = open((char *)uart->path, O_RDWR | O_NOCTTY | O_NDELAY); // Open in non-blocking read/write mode
-    uart->fd = fd;
+    strcpy(uart.path, path);
+    int fd = open((char *)uart.path, O_RDWR | O_NOCTTY | O_NDELAY); // Open in non-blocking read/write mode
+    uart.fd = fd;
 
-    uart->pack_status.enable_read = true;
-    pthread_create(&uart->pthread_read_id, NULL, pthread_readUART_init, uart);
-	pthread_mutex_init(&uart->mutex_cks, NULL);
+    uart.pack_status.enable_read = true;
 
     if (fd == -1)
     {
@@ -78,7 +79,8 @@ unsigned char UART_Init(uart_t *uart)
 
     struct termios options;
 
-    int baud_rate = UART_BaudtoSpeed(uart->baudrate);
+    uart.baudrate = baudrate;
+    int baud_rate = UART_BaudtoSpeed(uart.baudrate);
     if (baud_rate == UART_SpeedErr)
     {
         printf("Invalid baudrate\n");
@@ -96,21 +98,25 @@ unsigned char UART_Init(uart_t *uart)
         printf("UART Config Fail\n");
         return (unsigned char)conf;
     }
+
+	pthread_mutex_init(&uart->mutex_cks, NULL);
+    pthread_create(&uart->pthread_send_fd, NULL, pthread_read, uart);
+    pthread_create(&uart->pthread_read_fd, NULL, pthread_send, uart);
 }
 
 unsigned char UART_Deinit(uart_t *uart)
 {
     // int uart_filestream = open((char *)uart->path, O_RDWR );
-    if( uart->fd){
-        close(uart->fd);
+    if( uart.fd){
+        close(uart.fd);
     }
-    pthread_mutex_destroy(&uart->mutex_cks);
-	pthread_join(uart->pthread_read_id , (void *)pthread_readUART_deinit(uart));
+    pthread_mutex_destroy(&uart.mutex_cks);
+
     return (unsigned char)UART_Res_NoErr;
 }
 
 // Hàm truyền dữ liệu qua UART
-UART_ResType UART_Write(uart_t *uart, UART_DataType *data, int leng)
+UART_ResType UART_Write(UART_DataType *data, int leng)
 {
     if (uart->fd < 0){
         return UART_Res_OpenErr;
@@ -123,7 +129,7 @@ UART_ResType UART_Write(uart_t *uart, UART_DataType *data, int leng)
     return UART_Res_NoErr;
 }
 
-int UART_Read(uart_t *uart, UART_DataType *data, int leng)
+int UART_Read(UART_DataType *data)
 {
     int uart_fd = uart->fd;
     if (uart_fd < 0){
@@ -142,34 +148,10 @@ int UART_Read(uart_t *uart, UART_DataType *data, int leng)
         if (FD_ISSET(uart_fd, &readSet)){
             recvbytes = read(uart_fd, data, leng);
         }
-    }    return recvbytes;
+    }   
+    return recvbytes;
 }
 
-void *pthread_readUART_init(void *argc)
-	{
-	    uart_t *uart = (uart_t*)argc;
-        
-		while (uart->pack_status.enable_read == true)
-		{
-			if( UART_Read(uart, uart->pack_status.readpack_str, PACKET_LENG) > 0) {
-                printf("UART_Read: \n");
-				for(int i = 0; i < PACKET_LENG; i++)
-				{
-					printf("%02X ", uart->pack_status.readpack_str[i]);
-				}
-				printf("\n");
-				memset(uart->pack_status.readpack_str, 0x00, PACKET_LENG);
-			}
-            else if (UART_Read(uart, uart->pack_status.readpack_str, PACKET_LENG) < 0){
-                printf("UART RX error\n");
-            }
-            else {
-                printf("no data UART RX   test commit\n"); 
-		    }
-        }
-		printf("End pthread read uart\n");
-		pthread_exit(NULL);
-	}
 void *pthread_readUART_deinit(uart_t *uart)
 	{
 		uart->pack_status.enable_read = false;
